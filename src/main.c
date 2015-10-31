@@ -63,15 +63,6 @@ Wires from UC3:
 #include "fds.h"
 #include "usartdbg.h"
 
-//#include "tapedump-disk.c"
-//#include "allnight-disk.c"
-//#include "smb2-disk.c"
-//#include "metroid1-disk.c"
-//#include "metroid2-disk.c"
-
-//uint8_t *diskdata;
-//int disklen;
-
 #define PIN_SCANMEDIA	AVR32_PIN_PA31
 #define PIN_WRITEDATA	AVR32_PIN_PA30
 #define PIN_MOTORON		AVR32_PIN_PA29
@@ -107,12 +98,12 @@ Wires from UC3:
 #define FDS_KHZ		(FPBA_HZ / 2 / TRANSFER_RATE)
 
 volatile int count = 0;
+volatile int diskblock = 0;
 
 volatile uint8_t data, data2;
 volatile int outbit = 0;
 volatile int needbyte;
 volatile int bytes;
-int diskblock = 0;
 
 __attribute__((__interrupt__)) static void tc1_irq(void)
 {
@@ -141,20 +132,6 @@ __attribute__((__interrupt__)) static void tc1_irq(void)
 	else if(sr & AVR32_TC_SR1_CPAS_MASK) {
 		gpio_set_pin_low(PIN_RATE);
 	}
-}
-
-static void set_cpu_hz(void)
-{
-	// note that fpba_hz will be adjusted during runtime
-	pcl_freq_param_t pcl_freq_param =
-	{
-		.cpu_f = FCPU_HZ,
-		.pba_f = FPBA_HZ,
-		.osc0_f = FOSC0,
-		.osc0_startup = OSC0_STARTUP
-	};
-
-	pcl_configure_clocks(&pcl_freq_param);
 }
 
 static void init_timers(void)
@@ -196,7 +173,8 @@ static void init_timers(void)
 
 	cpu_irq_disable();
 
-	INTC_init_interrupts();
+	sysclk_enable_peripheral_clock(&AVR32_TC1);
+
 	INTC_register_interrupt(&tc1_irq, AVR32_TC1_IRQ1, AVR32_INTC_INT0);
 	
 	tc_init_waveform(tc1, &waveform_opt);
@@ -212,20 +190,19 @@ static void begin_transfer_data(void)
 	char tmp[64];
 	
 	usart_write_line(USART_DEBUG,"beginning transfer...\r\n");
-	count = 7;
-
 
 	flash_read_disk_start(diskblock);
+	flash_read_disk((uint8_t*)&data2,1);
 	needbyte = 0;
 	bytes = 1;
-	flash_read_disk((uint8_t)&data2,1);
+	count = 7;
 	
 	cpu_irq_enable();
 	while(IS_SCANMEDIA() && IS_DONT_STOPMOTOR()) {
 		if(needbyte) {
 			needbyte = 0;
 			bytes++;
-			flash_read_disk((uint8_t)&data2,1);
+			flash_read_disk((uint8_t*)&data2,1);
 		}
 		if(bytes >= 0xFF00) {
 			usart_write_line(USART_DEBUG,"reached end of data block, something went wrong...\r\n");
@@ -240,11 +217,12 @@ static void begin_transfer_data(void)
 	usart_write_line(USART_DEBUG,tmp);
 }
 
+void write_to_flash(int block, char *name, int next, uint8_t *data, int length);
 void write_to_flash(int block, char *name, int next, uint8_t *data, int length)
 {
 	flash_header_t header,header2;
 	char poo[512];
-			
+	
 	memset((void*)&header,0,256);
 	strcpy(header.name,name);
 	header.lead_in = 0;
@@ -270,30 +248,34 @@ static void print_block_info(int block)
 	usart_write_line(USART_DEBUG,poo);
 }
 
-int main (void)
+static void set_cpu_hz(void)
 {
-//	diskdata = (const uint8_t*)tapedump;
-//	disklen = tapedump_length;
-//	diskdata = (const uint8_t*)allnight;
-//	disklen = allnight_length;
+	// note that fpba_hz will be adjusted during runtime
+	pcl_freq_param_t pcl_freq_param = {
+		.cpu_f = FCPU_HZ,
+		.pba_f = FPBA_HZ,
+		.osc0_f = FOSC0,
+		.osc0_startup = OSC0_STARTUP
+	};
+	pcl_configure_clocks(&pcl_freq_param);
+}
 
-	/* Insert system clock initialization code here (sysclk_init()). */
-
+static void init_all(void)
+{
+	sysclk_init();
 	board_init();
-	
 	set_cpu_hz();
-	
-	sysclk_enable_peripheral_clock(&AVR32_TC1);
-
+	INTC_init_interrupts();
 	usartdbg_init();
 	flash_init();
-
 	init_timers();
-
-	cpu_irq_disable();
-
 	usart_write_line(USART_DEBUG,"\r\n\r\nuc3-fdsemu started.\r\n");
+}
 
+int main (void)
+{
+	init_all();
+	
 	gpio_configure_pin(PIN_WRITE,		GPIO_DIR_INPUT);
 	gpio_configure_pin(PIN_SCANMEDIA,	GPIO_DIR_INPUT);
 	gpio_configure_pin(PIN_WRITEDATA,	GPIO_DIR_INPUT);
@@ -313,32 +295,13 @@ int main (void)
 	CLEAR_MEDIASET();
 	CLEAR_MOTORON();
 
-//	cpu_delay_ms(2000,FCPU_HZ);
-//	write_to_flash(0,"All Night Nippon",0xFFFF,allnight,allnight_length);
-
-/*	cpu_delay_ms(2000,FCPU_HZ);
-	write_to_flash(0,"All Night Nippon",0xFFFF,allnight,allnight_length);
-	write_to_flash(1,"Metroid",3,metroid1,metroid1_length);
-	//write_to_flash(2,"Super Mario Brothers 2",0xFFFF,smb2,smb2_length);
-	write_to_flash(3,"Metroid",1,metroid2,metroid2_length);
-	write_to_flash(4,"Tapedump",0xFFFF,tapedump,tapedump_length);
-	write_to_flash(5,"All Night Nippon",0xFFFF,allnight,allnight_length);
-
-	{
-		int n;
-
-		for(n=0;n<8;n++) {
-			print_block_info(n);
-		}
-	}*/
-
-
 	while(1) {
 		int ch;
 		
 		if(usart_read_char(USART_DEBUG,&ch) == USART_SUCCESS) {
+			int n;
 			char tmp[64];
-			char help[] = 
+			char help[] =
 				"help:\r\n"
 				"  0-7 : select block to read disk data from\r\n"
 				"  i   : insert disk\r\n"
@@ -346,7 +309,6 @@ int main (void)
 				"  f   : flip disk to next side/disk\r\n"
 				"  p   : print disks stored in flash\r\n"
 				"\r\n";
-			int n;
 
 			switch((char)ch) {
 				case '?':
@@ -378,7 +340,7 @@ int main (void)
 					for(n=0;n<8;n++) {
 						print_block_info(n);
 					}
-				break;									
+					break;
 			}
 		}
 		gpio_toggle_pin(LED0_GPIO);

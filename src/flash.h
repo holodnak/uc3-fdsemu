@@ -18,10 +18,11 @@
 
 
 typedef struct flash_header_s {
-    uint8_t		name[240];			//null terminated ascii string
-	uint16_t	next_disk;			//block number of next disk (after this one, for dual sided game or games with two disks)
+    char		name[240];			//null terminated ascii string
+	uint16_t	next_disk;		//block number of next disk (after this one, for dual sided game or games with two disks)
 	uint16_t	lead_in;			//number of bits for lead in (0 for default)
-	uint8_t		reserved[12];
+	uint16_t	id;					//block id number
+	uint8_t		reserved[10];
 //    uint8_t		data[0xff00];	//disk data, beginning with lead in
 } flash_header_t;
 
